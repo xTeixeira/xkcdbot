@@ -1,14 +1,39 @@
 from telegram.ext import Updater, CommandHandler
+from telegram.error import TimedOut
 import requests
 from xkcd import *
 import logging
 import re
 import os.path
 import json
+import time
+from functools import wraps
 
 subscriberChats = []
 latestComic = 0
 subscribersFile = "subscribers.json"
+
+def send_message_retry(bot, chat_id, message, retries=5):
+	for nretries in range(retries):
+		try:
+			bot.send_message(chat_id, message)
+		except TimedOut:
+			time.sleep(1)
+			continue
+		return
+	
+	raise TimedOut
+
+def send_photo_retry(bot, chat_id, photo_path, retries=5):
+	for nretries in range(retries):
+		try:
+			bot.send_photo(chat_id, photo_path)
+		except TimedOut:
+			time.sleep(1)
+			continue
+		return
+	
+	raise TimedOut
 
 def start(bot, update):
 	update.message.reply_text(
@@ -43,42 +68,33 @@ def unsubscribe(bot, update):
 def xkcd(bot, update):
 	if update.message.text == "/xkcd" or update.message.text == "/xkcd latest":
 		comic = getLatestComic()
-		print(comic["img"])
-		print(comic["num"])
-		bot.send_photo(update.message.chat_id, comic["img"])
-		bot.send_message(update.message.chat_id, "xkcd "+str(comic["num"])+"\nAlt-text: "+comic["alt"])
+		send_photo_retry(bot, update.message.chat_id, comic["img"])
+		send_message_retry(bot, update.message.chat_id, "xkcd "+str(comic["num"])+"\nAlt-text: "+comic["alt"])
 
 	elif update.message.text == "/xkcd random":
 		comic = getRandomComic(latestComic)
-		print(comic["img"])
-		print(comic["num"])
-		bot.send_photo(update.message.chat_id, comic["img"])
-		bot.send_message(update.message.chat_id, "xkcd "+str(comic["num"])+"\nAlt-text: "+comic["alt"])
+		send_photo_retry(bot, update.message.chat_id, comic["img"])
+		send_message_retry(bot, update.message.chat_id, "xkcd "+str(comic["num"])+"\nAlt-text: "+comic["alt"])
 
 	else:
 		xkcdNumber = int(re.search(r'\d+', update.message.text).group())
 		comic = getComic(xkcdNumber)
-		print(comic["img"])
-		print(comic["num"])
-		bot.send_photo(update.message.chat_id, comic["img"])
-		bot.send_message(update.message.chat_id, "xkcd "+str(comic["num"])+"\nAlt-text: "+comic["alt"])
+		send_photo_retry(bot, update.message.chat_id, comic["img"])
+		send_message_retry(bot, update.message.chat_id, "xkcd "+str(comic["num"])+"\nAlt-text: "+comic["alt"])
 
 def random(bot, update):
 	comic = getRandomComic(latestComic)
-	print(comic["img"])
-	print(comic["num"])
-	bot.send_photo(update.message.chat_id, comic["img"])
-	bot.send_message(update.message.chat_id, "xkcd "+str(comic["num"])+"\nAlt-text: "+comic["alt"])
+	send_photo_retry(bot, update.message.chat_id, comic["img"])
+	send_message_retry(bot, update.message.chat_id, "xkcd "+str(comic["num"])+"\nAlt-text: "+comic["alt"])
 
 def comicNotify(bot, job):
 	comic = getLatestComic()
 	if comic["num"] > latestComic:
-		for chat_id in subscriberChats:
-			bot.send_message(chat_id, "A new xkcd is out!")
-			bot.send_photo(chat_id, comic["img"])
-			bot.send_message(chat_id, "xkcd "+str(comic["num"])+"\nAlt-text: "+comic["alt"])
-
 		setLatestComic()
+		for chat_id in subscriberChats:
+			send_message_retry(bot, chat_id, "A new xkcd is out!")
+			send_photo_retry(bot, chat_id, comic["img"])
+			send_message_retry(bot, chat_id, "xkcd "+str(comic["num"])+"\nAlt-text: "+comic["alt"])
 
 def setLatestComic():
 	global latestComic
@@ -104,7 +120,7 @@ def main():
 
 	# Set up logging to stdout. Todo: Actually make a log file.
 	logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+					format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 	
 	# Configure updater with our API token.
 	updater = Updater("You should insert your API token here")
